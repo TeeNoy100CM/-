@@ -1,0 +1,6 @@
+streamlit
+streamlit-folium
+streamlit-autorefresh
+folium
+pandas
+branca
