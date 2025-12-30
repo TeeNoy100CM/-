@@ -1,3 +1,4 @@
+%%writefile app.py
 import streamlit as st
 import socket
 import pandas as pd
@@ -9,71 +10,6 @@ from datetime import datetime
 from branca.element import Template, MacroElement
 import time
 from streamlit_autorefresh import st_autorefresh
-import os
-import pytz # อย่าลืม import เพิ่มด้านบนสุด
-from datetime import datetime
-
-def get_thai_time():
-    """ดึงเวลาปัจจุบันของประเทศไทย"""
-    tz = pytz.timezone('Asia/Bangkok')
-    return datetime.now(tz).strftime('%Y-%m-%d %H:%M:%S')
-
-# ในส่วนที่ใช้บันทึกข้อมูล ให้เปลี่ยนจาก datetime.now() เป็น get_thai_time()
-# ตัวอย่าง:
-# "Timestamp": get_thai_time()
-
-# ---------- ฟังก์ชันสำหรับระบบ Logging ----------
-HISTORY_FILE = "status_history.csv"
-
-def save_to_history(df):
-    """บันทึกข้อมูลการสแกนลงไฟล์ CSV แบบต่อท้าย"""
-    # ตรวจสอบว่ามีไฟล์อยู่แล้วหรือไม่ เพื่อเขียน Header
-    file_exists = os.path.isfile(HISTORY_FILE)
-    
-    # เลือกเฉพาะคอลัมน์ที่จำเป็นเพื่อประหยัดพื้นที่
-    log_df = df[["Label", "Status", "Timestamp", "IP"]].copy()
-    
-    # บันทึกแบบ Append
-    log_df.to_csv(HISTORY_FILE, mode='a', index=False, header=not file_exists, encoding="utf-8-sig")
-
-
-def get_status_changes():
-    if not os.path.isfile(HISTORY_FILE): 
-        return None
-    
-    df_history = pd.read_csv(HISTORY_FILE)
-    
-    # 1. บังคับแปลงคอลัมน์ Timestamp ให้เป็น datetime ก่อน (ป้องกัน Error)
-    df_history['Timestamp'] = pd.to_datetime(df_history['Timestamp'], errors='coerce')
-    
-    # 2. ลบแถวที่เวลาผิดพลาด (ถ้ามี)
-    df_history = df_history.dropna(subset=['Timestamp'])
-    
-    # 3. บวก 7 ชั่วโมงเพื่อปรับเป็นเวลาไทย
-    df_history['Timestamp'] = df_history['Timestamp'] + pd.Timedelta(hours=7)
-    
-    # 4. เรียงลำดับข้อมูล
-    df_history = df_history.sort_values(['Label', 'Timestamp'])
-    
-    # 5. หาสถานะก่อนหน้าเพื่อเช็คการเปลี่ยนแปลง
-    df_history['Prev_Status'] = df_history.groupby('Label')['Status'].shift(1)
-    
-    # 6. กรองเฉพาะแถวที่สถานะเปลี่ยนจริง
-    changes_df = df_history[
-        (df_history['Prev_Status'].notna()) & 
-        (df_history['Status'] != df_history['Prev_Status'])
-    ].copy()
-    
-    # 7. สร้างคอลัมน์ Event และ Current_Status
-    changes_df['Event'] = changes_df['Prev_Status'] + " ➡️ " + changes_df['Status']
-    changes_df['Current_Status'] = changes_df['Status']
-    
-    # 8. จัดรูปแบบการแสดงผลเวลาไทย (วัน/เดือน/ปี ชั่วโมง:นาที) และเอา 10 แถวล่าสุด
-    changes_df = changes_df.sort_values('Timestamp', ascending=False)
-    changes_df['Timestamp'] = changes_df['Timestamp'].dt.strftime('%d-%m-%Y %H:%M:%S')
-    
-    # ตัดเหลือ 10 แถวตามที่คุณต้องการ และไม่เอา IP
-    return changes_df[['Timestamp', 'Label', 'Event', 'Current_Status']].head(10)
 
 # ---------- ตั้งค่าหน้า ----------
 st.set_page_config(page_title="เครื่องวัดคลื่นสั่นสะเทือนพื้นดิน", layout="wide")
@@ -290,7 +226,6 @@ if manual_trigger or (now - last_scan_time >= 600):
         current_df = pd.DataFrame(results)
     st.session_state["scan_df"] = current_df
     st.session_state["last_scan_time"] = now
-    save_to_history(current_df)
 
     # แสดง diff สถานะ
     if not previous_df.empty:
@@ -336,43 +271,9 @@ if "scan_df" in st.session_state:
             </div>
         </div>
         """,
-        unsafe_allow_html=True,)
- 
-    # ✅ สร้าง Tabs แยกหน้าจอ
-    tabs = st.tabs(["📊 ประวัติ"])
-    tab_main = tabs[0]
-    with tab_main: # เปลี่ยนกลับเป็น tab2 หรือตามที่คุณตั้งไว้
-      st.subheader("🕒 บันทึกประวัติการสลับสถานะ")
-    
-    # ... โค้ดส่วนดึงข้อมูล ...
-change_log = get_status_changes()
-
-if change_log is not None and not change_log.empty:
-    # ✅ เพิ่ม .head(10) เพื่อเลือกแสดงเฉพาะ 10 รายการล่าสุด
-    # คุณสามารถเปลี่ยนเลข 10 เป็นจำนวนที่ต้องการได้ เช่น 5 หรือ 15
-    view_df = change_log[['Timestamp', 'Label', 'Event', 'Current_Status']].head(10)
-
-    # ฟังก์ชันกำหนดสี (ONLINE=เขียว, OFFLINE=แดง)
-    def highlight_by_status(row):
-        color = 'color: #2ecc71; font-weight: bold;' if row['Current_Status'] == 'ONLINE' else 'color: #e74c3c; font-weight: bold;'
-        return [color] * len(row)
-
-    # แสดงตาราง
-    st.dataframe(
-        view_df.style.apply(highlight_by_status, axis=1),
-        column_config={
-            "Timestamp": "วัน-เวลา",
-            "Label": "ชื่อสถานี",
-            "Event": "การเปลี่ยนแปลง",
-            "Current_Status": "สถานะปัจจุบัน"
-        },
-        hide_index=True,
-        use_container_width=True,
-        # ปรับความสูงตารางให้พอดีกับจำนวนแถว
-        height=400 
+        unsafe_allow_html=True,
     )
-    st.caption(f"📌 แสดงเฉพาะ 10 รายการล่าสุดที่มีการเปลี่ยนแปลง")
-                   
+
     # แผนที่รวม
     m = folium.Map(location=[13.5, 101], zoom_start=6)
     for row in df.itertuples():
