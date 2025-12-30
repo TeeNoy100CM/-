@@ -1,4 +1,3 @@
-%%writefile app.py
 import streamlit as st
 import socket
 import pandas as pd
